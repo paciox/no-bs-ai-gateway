@@ -1,0 +1,23 @@
+{
+  "name": "no-bs-ai-gateway",
+  "version": "0.1.0",
+  "description": "No-BS AI Gateway — single OpenAI-compatible endpoint for multiple AI providers",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.3",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}
