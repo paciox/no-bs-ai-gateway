@@ -8,10 +8,10 @@
     {
       "openrouter": {
         "baseUrl": "https://openrouter.ai/api/v1",
-        "apiKey": "sk-or-v1-",
+        "apiKey": "sk-or-v1-78",
         "retries": 3,
         "retriesDelayMs": 5000,
-        "timeout": 60000,
+        "timeout": 460000,
         "enabled": true,
         "models": [
           {
@@ -90,10 +90,10 @@
     {
       "nvidia": {
         "baseUrl": "https://integrate.api.nvidia.com/v1",
-        "apiKey": "nvapi-",
+        "apiKey": "nvapi-vnUf",
         "retries": 3,
         "retriesDelayMs": 5000,
-        "timeout": 60000,
+        "timeout": 460000,
         "enabled": true,
         "models": [
           {

@@ -2,7 +2,7 @@
 import type { ServerResponse } from "node:http";
 import { log } from "./logger.js";
 
-const STALL_TIMEOUT_MS = 30_000;
+const DEFAULT_STALL_TIMEOUT_MS = 60_000;
 
 /**
  * Set SSE response headers on the client response.
@@ -23,7 +23,8 @@ export function setSSEHeaders(res: ServerResponse): void {
 export async function streamResponse(
   upstreamResponse: Response,
   clientRes: ServerResponse,
-  ourModelId: string
+  ourModelId: string,
+  stallTimeoutMs: number = DEFAULT_STALL_TIMEOUT_MS
 ): Promise<{ tokensIn?: number; tokensOut?: number }> {
   const body = upstreamResponse.body;
   if (!body) {
@@ -42,7 +43,7 @@ export async function streamResponse(
 
   try {
     while (true) {
-      const chunk = await readWithStallDetection(reader, STALL_TIMEOUT_MS);
+      const chunk = await readWithStallDetection(reader, stallTimeoutMs);
       if (chunk.done) break;
 
       buffer += decoder.decode(chunk.value, { stream: true });

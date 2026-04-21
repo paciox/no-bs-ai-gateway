@@ -299,7 +299,7 @@ async function attemptModel(
   // Success — proxy the response
   if (isStream) {
     setSSEHeaders(res);
-    const usage = await streamResponse(upstreamResponse, res, entry.key);
+    const usage = await streamResponse(upstreamResponse, res, entry.key, entry.provider.timeout ?? 60_000);
     const latency = Date.now() - startTime;
     completeRequest(requestId, "success", latency, {
       tokensIn: usage.tokensIn,
