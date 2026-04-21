@@ -1,0 +1,117 @@
+{
+  "_comment": "MODEL-SPECIFIC FALLBACK EXAMPLE — each model declares its own ordered list of fallback candidates. When a model fails all retries, the gateway tries each listed fallbackModels entry in order until one succeeds or fallbackLimit is reached. Entries must be 'providerName/modelId' keys matching models in this config.",
+
+  "port": 4000,
+  "host": "127.0.0.1",
+
+  "cascadeEnabled": true,
+  "fallBackModality": "model_specific",
+  "fallbackLimit": 2,
+
+  "providers": [
+    {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "apiKey": "sk-or-YOUR_KEY_HERE",
+        "retries": 3,
+        "retriesDelayMs": 5000,
+        "timeout": 60000,
+        "enabled": true,
+        "models": [
+          {
+            "_comment": "This model has its own fallback list. If it fails: try nvidia/meta/llama-3.1-405b-instruct first, then openrouter/anthropic/claude-3-haiku.",
+            "modelId": "openai/gpt-4",
+            "enabled": true,
+            "fallbackModels": [
+              "nvidia/meta/llama-3.1-405b-instruct",
+              "openrouter/anthropic/claude-3-haiku"
+            ],
+            "contextWindow": 128000,
+            "maxTokens": 16384,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "This model falls back to a single nvidia model if it fails.",
+            "modelId": "anthropic/claude-3-haiku",
+            "enabled": true,
+            "fallbackModels": [
+              "nvidia/meta/llama-3.1-405b-instruct"
+            ],
+            "contextWindow": 200000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "No fallbackModels — this model never rotates on failure. Retries still apply.",
+            "modelId": "google/gemma-3-27b-it:free",
+            "enabled": true,
+            "contextWindow": 131072,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "nvidia": {
+        "baseUrl": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "nvapi-YOUR_KEY_HERE",
+        "retries": 3,
+        "retriesDelayMs": 5000,
+        "timeout": 60000,
+        "enabled": true,
+        "models": [
+          {
+            "_comment": "Used as a fallback target by openrouter models above. It also has its own fallback list in case it too fails.",
+            "modelId": "meta/llama-3.1-405b-instruct",
+            "enabled": true,
+            "fallbackModels": [
+              "openrouter/anthropic/claude-3-haiku"
+            ],
+            "contextWindow": 128000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "Fallback target with no further fallback of its own. Last resort.",
+            "modelId": "mistralai/mistral-large-2-instruct",
+            "enabled": true,
+            "contextWindow": 131072,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

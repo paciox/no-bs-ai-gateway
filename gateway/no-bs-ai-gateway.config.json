@@ -1,19 +1,23 @@
 {
   "port": 4000,
   "host": "127.0.0.1",
+  "cascadeEnabled": true,
+  "fallBackModality": "cascade",
+  "fallbackLimit": 3,
   "providers": [
     {
       "openrouter": {
         "baseUrl": "https://openrouter.ai/api/v1",
-        "apiKey": "sk-or-v1-79......",
+        "apiKey": "sk-or-v1-78",
         "retries": 3,
         "retriesDelayMs": 5000,
-        "timeout": 60000,
+        "timeout": 460000,
         "enabled": true,
         "models": [
           {
             "modelId": "openrouter/elephant-alpha",
             "enabled": true,
+            "fallbackOrder": 1,
             "contextWindow": 262144,
             "maxTokens": 32768,
             "capabilities": {
@@ -27,6 +31,7 @@
           {
             "modelId": "google/gemma-4-31b-it:free",
             "enabled": true,
+            "fallbackOrder": 2,
             "contextWindow": 262144,
             "maxTokens": 32768,
             "capabilities": {
@@ -40,6 +45,7 @@
           {
             "modelId": "nvidia/nemotron-3-super-120b-a12b:free",
             "enabled": true,
+            "fallbackOrder": 4,
             "contextWindow": 262144,
             "maxTokens": 262144,
             "capabilities": {
@@ -53,6 +59,7 @@
           {
             "modelId": "liquid/lfm-2.5-1.2b-thinking:free",
             "enabled": true,
+            "fallbackOrder": 5,
             "contextWindow": 32768,
             "maxTokens": 4096,
             "capabilities": {
@@ -66,6 +73,7 @@
           {
             "modelId": "openrouter/free",
             "enabled": true,
+            "fallbackOrder": 6,
             "contextWindow": 200000,
             "maxTokens": 8192,
             "capabilities": {
@@ -82,28 +90,16 @@
     {
       "nvidia": {
         "baseUrl": "https://integrate.api.nvidia.com/v1",
-        "apiKey": "nvapi-hZ.....",
+        "apiKey": "nvapi-vnUf",
         "retries": 3,
         "retriesDelayMs": 5000,
-        "timeout": 60000,
+        "timeout": 460000,
         "enabled": true,
         "models": [
           {
             "modelId": "z-ai/glm-5.1",
             "enabled": true,
-            "contextWindow": 131072,
-            "maxTokens": 131072,
-            "capabilities": {
-              "tools": true,
-              "images": false,
-              "streaming": true,
-              "thinking": true,
-              "files": false
-            }
-          },
-           {
-            "modelId": "z-ai/glm-4.7",
-            "enabled": true,
+            "fallbackOrder": 3,
             "contextWindow": 131072,
             "maxTokens": 131072,
             "capabilities": {
@@ -117,6 +113,7 @@
           {
             "modelId": "minimaxai/minimax-m2.7",
             "enabled": true,
+            "fallbackOrder": 7,
             "contextWindow": 204800,
             "maxTokens": 8192,
             "capabilities": {
@@ -130,6 +127,7 @@
                     {
             "modelId": "google/gemma-4-31b-it",
             "enabled": true,
+            "fallbackOrder": 8,
             "contextWindow": 262144,
             "maxTokens": 32768,
             "capabilities": {
@@ -143,6 +141,7 @@
           {
             "modelId": "mistralai/mistral-small-4-119b-2603",
             "enabled": true,
+            "fallbackOrder": 9,
             "contextWindow": 262144,
             "maxTokens": 8192,
             "capabilities": {
@@ -156,6 +155,7 @@
           {
             "modelId": "qwen/qwen3.5-122b-a10b",
             "enabled": true,
+            "fallbackOrder": 10,
             "contextWindow": 262144,
             "maxTokens": 8192,
             "capabilities": {

@@ -161,7 +161,7 @@ async function handleRequest(
       return;
     }
 
-    await handleChatCompletions(body, result, res);
+    await handleChatCompletions(body, result, res, config);
     return;
   }
 
@@ -208,9 +208,21 @@ async function handleRequest(
         maxTokens: e.model.maxTokens,
         available: status?.available ?? null,
         lastError: status?.last_error ?? null,
+        fallbackOrder: e.model.fallbackOrder ?? null,
+        fallbackModels: e.model.fallbackModels ?? null,
       };
     });
     sendJson(res, 200, models);
+    return;
+  }
+
+  // ── GET /api/config-summary ────────────────────────────────────────────
+  if (method === "GET" && path === "/api/config-summary") {
+    sendJson(res, 200, {
+      cascadeEnabled: config.cascadeEnabled,
+      fallBackModality: config.fallBackModality,
+      fallbackLimit: config.fallbackLimit,
+    });
     return;
   }
 

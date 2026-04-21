@@ -20,6 +20,10 @@ export interface ModelConfig {
   retries?: number;
   retriesDelayMs?: number;
   capabilities?: ModelCapabilities;
+  /** cascade mode: global unique ordering integer (positive) */
+  fallbackOrder?: number;
+  /** model_specific mode: ordered list of "providerName/modelId" fallback keys */
+  fallbackModels?: string[];
 }
 
 export interface ProviderConfig {
@@ -33,12 +37,17 @@ export interface ProviderConfig {
   models: ModelConfig[];
 }
 
+export type FallbackModality = "cascade" | "model_specific";
+
 export interface GatewayConfig {
   port: number;
   host: string;
   maxBodySize?: number; // bytes, default 50MB
   dbRetentionDays?: number; // default 7
   scanIntervalMs?: number; // default 30 min
+  cascadeEnabled?: boolean;
+  fallBackModality?: FallbackModality;
+  fallbackLimit?: number; // max fallback hops after primary (0 = no fallback)
   providers: Array<Record<string, ProviderConfig>>;
 }
 
@@ -63,6 +72,8 @@ export interface ResolvedModelConfig {
   retries: number;
   retriesDelayMs: number;
   capabilities: Required<ModelCapabilities>;
+  fallbackOrder?: number;
+  fallbackModels?: string[];
 }
 
 export interface ResolvedProviderConfig {
@@ -83,6 +94,9 @@ export interface ResolvedConfig {
   maxBodySize: number;
   dbRetentionDays: number;
   scanIntervalMs: number;
+  cascadeEnabled: boolean;
+  fallBackModality: FallbackModality;
+  fallbackLimit: number;
   providers: ResolvedProviderConfig[];
 }
 
@@ -133,6 +147,8 @@ function resolveModel(
       thinking: model.capabilities?.thinking ?? false,
       files: model.capabilities?.files ?? false,
     },
+    fallbackOrder: model.fallbackOrder,
+    fallbackModels: model.fallbackModels,
   };
 }
 
@@ -219,12 +235,24 @@ export function validateAndResolve(raw: GatewayConfig): ResolvedConfig {
     providers.push(resolved);
   }
 
+  // ── Fallback validation ──────────────────────────────────────────────────
+  const fallbackWarnings = validateFallbackConfig(raw, allModelKeys);
+  if (fallbackWarnings.length > 0) {
+    // On startup these are fatal; on reload caller catches and treats as warnings
+    throw new ConfigError(
+      `Fallback configuration errors:\n${fallbackWarnings.map((w) => `  - ${w}`).join("\n")}`
+    );
+  }
+
   return {
     port: raw.port ?? DEFAULT_PORT,
     host: raw.host ?? DEFAULT_HOST,
     maxBodySize: raw.maxBodySize ?? DEFAULT_MAX_BODY_SIZE,
     dbRetentionDays: raw.dbRetentionDays ?? DEFAULT_DB_RETENTION_DAYS,
     scanIntervalMs: raw.scanIntervalMs ?? DEFAULT_SCAN_INTERVAL_MS,
+    cascadeEnabled: raw.cascadeEnabled ?? false,
+    fallBackModality: raw.fallBackModality ?? "cascade",
+    fallbackLimit: raw.fallbackLimit ?? 0,
     providers,
   };
 }
@@ -261,4 +289,109 @@ export function loadConfig(configPath?: string): ResolvedConfig {
 // Re-export for hot-reload
 export function reloadConfig(configPath?: string): ResolvedConfig {
   return loadConfig(configPath);
+}
+
+// ─── Fallback validation ─────────────────────────────────────────────────────
+
+function validateFallbackConfig(
+  raw: GatewayConfig,
+  allModelKeys: Set<string>
+): string[] {
+  const errors: string[] = [];
+
+  // Validate fallBackModality
+  if (
+    raw.fallBackModality !== undefined &&
+    raw.fallBackModality !== "cascade" &&
+    raw.fallBackModality !== "model_specific"
+  ) {
+    errors.push(
+      `fallBackModality must be "cascade" or "model_specific", got: "${raw.fallBackModality}"`
+    );
+  }
+
+  // Validate fallbackLimit
+  if (
+    raw.fallbackLimit !== undefined &&
+    (typeof raw.fallbackLimit !== "number" ||
+      !Number.isInteger(raw.fallbackLimit) ||
+      raw.fallbackLimit < 0)
+  ) {
+    errors.push(
+      `fallbackLimit must be a non-negative integer, got: ${raw.fallbackLimit}`
+    );
+  }
+
+  // Only validate model-level fields if fallback is enabled
+  if (!raw.cascadeEnabled) {
+    return errors;
+  }
+
+  const modality = raw.fallBackModality ?? "cascade";
+
+  if (modality === "cascade") {
+    // Validate fallbackOrder: globally unique, positive integer
+    const seenOrders = new Map<number, string>(); // order -> model key
+    for (const entry of raw.providers) {
+      const pName = Object.keys(entry)[0];
+      const pRaw = entry[pName];
+      if (!pRaw?.models) continue;
+      for (const model of pRaw.models) {
+        if (model.fallbackOrder === undefined) continue;
+        if (
+          typeof model.fallbackOrder !== "number" ||
+          !Number.isInteger(model.fallbackOrder) ||
+          model.fallbackOrder < 1
+        ) {
+          errors.push(
+            `Model "${pName}/${model.modelId}" fallbackOrder must be a positive integer, got: ${model.fallbackOrder}`
+          );
+          continue;
+        }
+        const key = `${pName}/${model.modelId}`;
+        const existing = seenOrders.get(model.fallbackOrder);
+        if (existing) {
+          errors.push(
+            `Duplicate fallbackOrder ${model.fallbackOrder}: "${existing}" and "${key}"`
+          );
+        } else {
+          seenOrders.set(model.fallbackOrder, key);
+        }
+      }
+    }
+  }
+
+  if (modality === "model_specific") {
+    // Validate fallbackModels: must reference existing keys, no self-ref, no dupes
+    for (const entry of raw.providers) {
+      const pName = Object.keys(entry)[0];
+      const pRaw = entry[pName];
+      if (!pRaw?.models) continue;
+      for (const model of pRaw.models) {
+        if (!model.fallbackModels || model.fallbackModels.length === 0) continue;
+        const key = `${pName}/${model.modelId}`;
+        const seen = new Set<string>();
+        for (const ref of model.fallbackModels) {
+          if (ref === key) {
+            errors.push(
+              `Model "${key}" fallbackModels contains self-reference "${ref}"`
+            );
+          }
+          if (seen.has(ref)) {
+            errors.push(
+              `Model "${key}" fallbackModels contains duplicate "${ref}"`
+            );
+          }
+          seen.add(ref);
+          if (!allModelKeys.has(ref)) {
+            errors.push(
+              `Model "${key}" fallbackModels references unknown model "${ref}" — must be a configured "providerName/modelId" key`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return errors;
 }

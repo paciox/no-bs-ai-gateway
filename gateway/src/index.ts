@@ -84,7 +84,12 @@ async function main() {
       );
       log.info("config", "Config reloaded successfully");
     } catch (err: any) {
-      log.error("config", `Config reload failed: ${err.message} — keeping previous config`);
+      // On reload, fallback-only validation errors are warnings — keep previous config
+      if (err.name === "ConfigError" && err.message.includes("Fallback configuration errors:")) {
+        log.warn("config", `Fallback config warning: ${err.message} — keeping previous config`);
+      } else {
+        log.error("config", `Config reload failed: ${err.message} — keeping previous config`);
+      }
     }
   });
 
