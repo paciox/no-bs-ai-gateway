@@ -179,6 +179,42 @@
     font-size: 14px;
   }
 
+  /* Fallback info tooltip */
+  .fallback-info {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: default;
+    user-select: none;
+  }
+  .fallback-info:hover .fallback-tooltip { display: block; }
+  .fallback-tooltip {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 240px;
+    max-width: 320px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.4;
+    z-index: 100;
+    white-space: normal;
+    pointer-events: none;
+  }
+  .warn-icon { color: var(--red); margin-right: 4px; font-size: 13px; }
+
   .refresh-indicator {
     font-size: 11px;
     color: var(--text-dim);
@@ -237,7 +273,12 @@
   <div class="panel">
     <div class="panel-header">
       <span>Configured Models</span>
-      <span class="count" id="model-count">0</span>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span id="fallback-mode" class="badge badge-dim" style="display:none;"></span>
+        <span id="cascade-toggle" style="display:none;cursor:default;"></span>
+        <span id="fallback-info" class="fallback-info" style="display:none;">&#9432;<span class="fallback-tooltip"></span></span>
+        <span class="count" id="model-count">0</span>
+      </div>
     </div>
     <div class="table-scroll">
       <table>
@@ -246,13 +287,14 @@
             <th>Status</th>
             <th>Model</th>
             <th>Provider</th>
+            <th>Order</th>
             <th>Context</th>
             <th>Max Tokens</th>
             <th>Capabilities</th>
           </tr>
         </thead>
         <tbody id="models-body">
-          <tr><td colspan="6" class="empty-state">Loading...</td></tr>
+          <tr><td colspan="7" class="empty-state">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -366,6 +408,40 @@
     document.getElementById('stat-latency').textContent = s.avg_latency_ms ? s.avg_latency_ms + 'ms' : '-';
   }
 
+  var configSummary = null;
+
+  async function refreshConfigSummary() {
+    const s = await fetchJSON('/api/config-summary');
+    if (!s) return;
+    configSummary = s;
+
+    // Mode badge
+    const modeEl = document.getElementById('fallback-mode');
+    modeEl.textContent = s.fallBackModality === 'model_specific' ? 'model-specific' : 'cascade';
+    modeEl.style.display = 'inline-block';
+
+    // Cascade ON/OFF
+    const toggleEl = document.getElementById('cascade-toggle');
+    if (s.fallBackModality === 'cascade' || !s.fallBackModality) {
+      toggleEl.innerHTML = s.cascadeEnabled
+        ? '<span class="badge badge-green">Cascade ON</span>'
+        : '<span class="badge badge-dim">Cascade OFF</span>';
+      toggleEl.style.display = 'inline-block';
+    } else {
+      toggleEl.style.display = 'none';
+    }
+
+    // Info tooltip
+    const infoEl = document.getElementById('fallback-info');
+    const tooltipEl = infoEl.querySelector('.fallback-tooltip');
+    var tooltipText = s.fallBackModality === 'model_specific'
+      ? 'Model-Specific mode: each model defines its own ordered list of fallback models. After retries fail, the gateway tries each listed model in order (up to the fallback limit) before returning an error.'
+      : 'Cascade mode: models are assigned a global numeric order. When a model fails all retries, the gateway automatically tries the next model by order number (n+1, n+2, …) up to the fallback limit.';
+    tooltipText += ' Fallback limit: ' + (s.fallbackLimit || 0) + ' hop(s).';
+    tooltipEl.textContent = tooltipText;
+    infoEl.style.display = 'inline-flex';
+  }
+
   async function refreshModels() {
     const models = await fetchJSON('/api/models');
     if (!models || !Array.isArray(models)) return;
@@ -374,9 +450,13 @@
     const tbody = document.getElementById('models-body');
 
     if (models.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No models configured</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No models configured</td></tr>';
       return;
     }
+
+    var isCascadeMode = !configSummary ||
+      configSummary.cascadeEnabled &&
+      (configSummary.fallBackModality === 'cascade' || !configSummary.fallBackModality);
 
     tbody.innerHTML = models.map(m => {
       const caps = m.capabilities || {};
@@ -384,10 +464,21 @@
         .map(([k, v]) => capBadge(k, v))
         .filter(Boolean)
         .join('');
+
+      var orderCell;
+      if (m.fallbackOrder != null) {
+        orderCell = '<span class="badge badge-blue">' + m.fallbackOrder + '</span>';
+      } else if (isCascadeMode) {
+        orderCell = '<span class="warn-icon" title="No fallback order set — this model will not participate in cascade fallback">&#9888;</span>';
+      } else {
+        orderCell = '<span style="color:var(--text-dim)">—</span>';
+      }
+
       return '<tr>' +
         '<td>' + statusDot(m) + '</td>' +
         '<td class="mono">' + esc(m.key) + '</td>' +
         '<td>' + esc(m.provider) + '</td>' +
+        '<td>' + orderCell + '</td>' +
         '<td>' + formatNumber(m.contextWindow) + '</td>' +
         '<td>' + formatNumber(m.maxTokens) + '</td>' +
         '<td><div class="cap-badges">' + capHtml + '</div></td>' +
@@ -454,7 +545,7 @@
   }
 
   async function refreshAll() {
-    await Promise.all([refreshStats(), refreshModels(), refreshRequests(), refreshErrors()]);
+    await Promise.all([refreshStats(), refreshConfigSummary(), refreshModels(), refreshRequests(), refreshErrors()]);
   }
 
   // Initial load

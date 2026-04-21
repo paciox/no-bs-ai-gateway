@@ -1,0 +1,111 @@
+{
+  "_comment": "CASCADE FALLBACK EXAMPLE — models are assigned a global numeric order. When the requested model fails all retries, the gateway tries the model with the next order number (n+1), then n+2, etc., across all providers, until one succeeds or fallbackLimit hops are exhausted.",
+
+  "port": 4000,
+  "host": "127.0.0.1",
+
+  "cascadeEnabled": true,
+  "fallBackModality": "cascade",
+  "fallbackLimit": 3,
+
+  "providers": [
+    {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "apiKey": "sk-or-YOUR_KEY_HERE",
+        "retries": 3,
+        "retriesDelayMs": 5000,
+        "timeout": 60000,
+        "enabled": true,
+        "models": [
+          {
+            "_comment": "Primary model — order 1. When this fails, gateway tries order 2.",
+            "modelId": "openai/gpt-4",
+            "enabled": true,
+            "fallbackOrder": 1,
+            "contextWindow": 128000,
+            "maxTokens": 16384,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "Second in chain — order 2. Tried if order 1 fails.",
+            "modelId": "anthropic/claude-3-haiku",
+            "enabled": true,
+            "fallbackOrder": 2,
+            "contextWindow": 200000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "No fallbackOrder — this model never participates in the cascade chain. Can still be called directly; retries still apply.",
+            "modelId": "google/gemma-3-27b-it:free",
+            "enabled": true,
+            "contextWindow": 131072,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "nvidia": {
+        "baseUrl": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "nvapi-YOUR_KEY_HERE",
+        "retries": 3,
+        "retriesDelayMs": 5000,
+        "timeout": 60000,
+        "enabled": true,
+        "models": [
+          {
+            "_comment": "Third in chain — order 3. Cross-provider fallback. Tried if orders 1 and 2 both fail.",
+            "modelId": "meta/llama-3.1-405b-instruct",
+            "enabled": true,
+            "fallbackOrder": 3,
+            "contextWindow": 128000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "_comment": "Order 4 — tried last if order 3 also fails. Gap from 3 to 4 is valid — the chain just skips missing numbers.",
+            "modelId": "mistralai/mistral-large-2-instruct",
+            "enabled": true,
+            "fallbackOrder": 4,
+            "contextWindow": 131072,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
