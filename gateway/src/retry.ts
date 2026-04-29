@@ -47,13 +47,19 @@ export interface UpstreamResponse {
  * For streaming: the caller must NOT start reading the body before this returns.
  * This function only retries if the initial connection/status fails.
  */
+export interface RetryResult<T> {
+  value: T;
+  retryCount: number;
+}
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
   params: RetryParams,
   ctx: RetryContext,
   isRetryable: (error: unknown) => boolean
-): Promise<T> {
+): Promise<RetryResult<T>> {
   let lastError: unknown;
+  let retryCount = 0;
 
   for (let attempt = 0; attempt <= params.retries; attempt++) {
     try {
@@ -64,9 +70,10 @@ export async function withRetry<T>(
           `Retry attempt ${attempt}/${params.retries} after ${backoff}ms`
         );
         await delay(backoff);
+        retryCount++;
       }
 
-      return await fn();
+      return { value: await fn(), retryCount };
     } catch (err) {
       lastError = err;
 

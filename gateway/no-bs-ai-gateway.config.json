@@ -1,21 +1,35 @@
 {
   "port": 4000,
   "host": "127.0.0.1",
-  "cascadeEnabled": true,
+  "cascadeEnabled": false,
   "fallBackModality": "cascade",
   "fallbackLimit": 3,
   "providers": [
     {
       "openrouter": {
         "baseUrl": "https://openrouter.ai/api/v1",
-        "apiKey": "sk-or-v1-78",
-        "retries": 3,
-        "retriesDelayMs": 5000,
-        "timeout": 460000,
+        "apiKey": "sk-or-v1-.....",
+        "retries": 2,
+        "retriesDelayMs": 2000,
+        "timeout": 60000,
         "enabled": true,
         "models": [
           {
-            "modelId": "openrouter/elephant-alpha",
+            "modelId": "tencent/hy3-preview:free",
+            "enabled": true,
+            "fallbackOrder": 1,
+            "contextWindow": 262144,
+            "maxTokens": 32768,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+           {
+            "modelId": "inclusionai/ling-2.6-1t:free",
             "enabled": true,
             "fallbackOrder": 1,
             "contextWindow": 262144,
@@ -83,6 +97,48 @@
               "thinking": true,
               "files": false
             }
+          },
+          {
+            "modelId": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+            "enabled": true,
+            "fallbackOrder": 7,
+            "contextWindow": 256000,
+            "maxTokens": 65536,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "poolside/laguna-xs.2:free",
+            "enabled": true,
+            "fallbackOrder": 8,
+            "contextWindow": 131100,
+            "maxTokens": 8200,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "modelId": "poolside/laguna-m.1:free",
+            "enabled": true,
+            "fallbackOrder": 9,
+            "contextWindow": 131100,
+            "maxTokens": 8200,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
           }
         ]
       }
@@ -90,12 +146,68 @@
     {
       "nvidia": {
         "baseUrl": "https://integrate.api.nvidia.com/v1",
-        "apiKey": "nvapi-vnUf",
-        "retries": 3,
-        "retriesDelayMs": 5000,
-        "timeout": 460000,
+        "apiKey": "nvapi-.....",
+        "retries": 2,
+        "retriesDelayMs": 2000,
+        "timeout": 60000,
         "enabled": true,
         "models": [
+           {
+            "modelId": "deepseek-ai/deepseek-v4-pro",
+            "enabled": true,
+            "fallbackOrder": 3,
+            "contextWindow": 999999,
+            "maxTokens": 500000,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+             {
+            "modelId": "deepseek-ai/deepseek-v4-flash",
+            "enabled": true,
+            "fallbackOrder": 3,
+            "contextWindow": 999999,
+            "maxTokens": 500000,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "deepseek/deepseek-v4-flash",
+            "enabled": true,
+            "fallbackOrder": 14,
+            "contextWindow": 1048576,
+            "maxTokens": 16000,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "deepseek/deepseek-v4-pro",
+            "enabled": true,
+            "fallbackOrder": 15,
+            "contextWindow": 1048576,
+            "maxTokens": 16000,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
           {
             "modelId": "z-ai/glm-5.1",
             "enabled": true,
@@ -118,6 +230,20 @@
             "maxTokens": 8192,
             "capabilities": {
               "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "modelId": "minimax/minimax-m2.7",
+            "enabled": true,
+            "fallbackOrder": 13,
+            "contextWindow": 204800,
+            "maxTokens": 16000,
+            "capabilities": {
+              "tools": false,
               "images": false,
               "streaming": true,
               "thinking": false,
@@ -163,6 +289,104 @@
               "images": true,
               "streaming": true,
               "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "modelId": "mistralai/mistral-medium-3.5-128b",
+            "enabled": true,
+            "fallbackOrder": 11,
+            "contextWindow": 262144,
+            "maxTokens": 16000,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            "enabled": true,
+            "fallbackOrder": 12,
+            "contextWindow": 256000,
+            "maxTokens": 16000,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "nvidia/llama-nemotron-embed-1b-v2",
+            "enabled": true,
+            "contextWindow": 2048,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": false,
+              "images": false,
+              "streaming": false,
+              "thinking": false,
+              "files": false,
+              "embeddings": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "anthropic": {
+        "baseUrl": "https://api.anthropic.com",
+        "apiKey": "YOUR_ANTHROPIC_API_KEY_HERE",
+        "retries": 2,
+        "retriesDelayMs": 2000,
+        "timeout": 60000,
+        "authHeader": "x-api-key",
+        "anthropicVersion": "2023-06-01",
+        "enabled": true,
+        "models": [
+          {
+            "modelId": "claude-opus-4-6",
+            "enabled": true,
+            "fallbackOrder": 1,
+            "contextWindow": 200000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "claude-sonnet-4-5",
+            "enabled": true,
+            "fallbackOrder": 2,
+            "contextWindow": 200000,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          },
+          {
+            "modelId": "claude-3-7-sonnet-20250219",
+            "enabled": true,
+            "fallbackOrder": 3,
+            "contextWindow": 200000,
+            "maxTokens": 8192,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
               "files": false
             }
           }

@@ -10,6 +10,7 @@ export interface ModelCapabilities {
   streaming?: boolean;
   thinking?: boolean;
   files?: boolean;
+  embeddings?: boolean;
 }
 
 export interface ModelConfig {
@@ -34,6 +35,7 @@ export interface ProviderConfig {
   timeout?: number;
   enabled: boolean;
   authHeader?: string; // default "Authorization", some use "x-api-key"
+  anthropicVersion?: string; // for Anthropic API: "2023-06-01"
   models: ModelConfig[];
 }
 
@@ -85,6 +87,7 @@ export interface ResolvedProviderConfig {
   timeout: number;
   enabled: boolean;
   authHeader: string;
+  anthropicVersion?: string;
   models: ResolvedModelConfig[];
 }
 
@@ -146,6 +149,7 @@ function resolveModel(
       streaming: model.capabilities?.streaming ?? true,
       thinking: model.capabilities?.thinking ?? false,
       files: model.capabilities?.files ?? false,
+      embeddings: model.capabilities?.embeddings ?? false,
     },
     fallbackOrder: model.fallbackOrder,
     fallbackModels: model.fallbackModels,
@@ -197,6 +201,7 @@ function resolveProvider(
     timeout: provider.timeout ?? DEFAULT_TIMEOUT,
     enabled: provider.enabled,
     authHeader: provider.authHeader ?? "Authorization",
+    anthropicVersion: provider.anthropicVersion,
     models,
   };
 }

@@ -5,9 +5,10 @@ import {
   modelDisabled,
   providerDisabled,
   modelGone,
+  modelBlacklisted,
   type GatewayError,
 } from "./errors.js";
-import { getModelStatus } from "./db.js";
+import { getModelStatus, isModelBlacklisted } from "./db.js";
 import { log } from "./logger.js";
 
 export interface RegistryEntry {
@@ -73,6 +74,11 @@ export function resolveModel(
 
   if (!entry.model.enabled) {
     return modelDisabled(requestedModel);
+  }
+
+  // Check if model is blacklisted by circuit breaker
+  if (isModelBlacklisted(entry.provider.name, entry.model.modelId)) {
+    return modelBlacklisted(requestedModel);
   }
 
   // Check if model was marked as gone by scanner

@@ -17,6 +17,93 @@ export function setSSEHeaders(res: ServerResponse): void {
 }
 
 /**
+ * Translate Anthropic SSE event to OpenAI format.
+ */
+function translateAnthropicSSE(event: string, data: any): { event?: string; data: any } | null {
+  // Anthropic uses event: lines with JSON data
+  // We need to convert to OpenAI's data: format
+  if (event === "message_start") {
+    return {
+      data: {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: data.message?.model ?? "unknown",
+        choices: [{ index: 0, delta: { role: "assistant" } }],
+      },
+    };
+  }
+
+  if (event === "content_block_start") {
+    return {
+      data: {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "unknown",
+        choices: [{ index: 0, delta: { content: "" } }],
+      },
+    };
+  }
+
+  if (event === "content_block_delta") {
+    const delta = data.delta;
+    if (delta.type === "text_delta") {
+      return {
+        data: {
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: "unknown",
+          choices: [{ index: 0, delta: { content: delta.text } }],
+        },
+      };
+    }
+    if (delta.type === "input_json_delta") {
+      return {
+        data: {
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: "unknown",
+          choices: [{ index: 0, delta: { content: delta.partial_json } }],
+        },
+      };
+    }
+  }
+
+  if (event === "content_block_stop") {
+    return {
+      data: {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "unknown",
+        choices: [{ index: 0, delta: {} }],
+      },
+    };
+  }
+
+  if (event === "message_delta") {
+    return {
+      data: {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "unknown",
+        choices: [{ index: 0, delta: {}, finish_reason: data.delta?.stop_reason }],
+      },
+    };
+  }
+
+  if (event === "message_stop") {
+    return { data: "[DONE]" };
+  }
+
+  return null;
+}
+
+/**
  * Stream an upstream SSE response to the client, rewriting the model field.
  * Returns usage info if found in the final chunk.
  */
@@ -24,7 +111,8 @@ export async function streamResponse(
   upstreamResponse: Response,
   clientRes: ServerResponse,
   ourModelId: string,
-  stallTimeoutMs: number = DEFAULT_STALL_TIMEOUT_MS
+  stallTimeoutMs: number = DEFAULT_STALL_TIMEOUT_MS,
+  isAnthropic: boolean = false
 ): Promise<{ tokensIn?: number; tokensOut?: number }> {
   const body = upstreamResponse.body;
   if (!body) {
@@ -52,38 +140,49 @@ export async function streamResponse(
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? ""; // keep incomplete line in buffer
 
-      for (const line of lines) {
-        if (line.startsWith("data: [DONE]")) {
-          clientRes.write("data: [DONE]\n\n");
-          continue;
-        }
+      let currentEvent = "";
+      let currentData: any = null;
 
-        if (line.startsWith("data: ")) {
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
           const jsonStr = line.slice(6);
           try {
-            const parsed = JSON.parse(jsonStr);
-            // Rewrite model field
-            if (parsed.model) {
-              parsed.model = ourModelId;
-            }
-            // Capture usage from final chunk
-            if (parsed.usage) {
-              usage.tokensIn = parsed.usage.prompt_tokens;
-              usage.tokensOut = parsed.usage.completion_tokens;
-            }
-            clientRes.write(`data: ${JSON.stringify(parsed)}\n\n`);
+            currentData = JSON.parse(jsonStr);
           } catch {
-            // If JSON parse fails, pass through as-is (lenient parsing)
-            clientRes.write(`${line}\n\n`);
+            currentData = null;
           }
-          continue;
-        }
-
-        // Pass through other SSE lines (event:, id:, comments, etc.)
-        if (line.trim()) {
-          clientRes.write(`${line}\n`);
-        } else {
+        } else if (line.trim() === "" && currentEvent && currentData !== null) {
+          // Empty line signals end of SSE message
+          if (isAnthropic) {
+            const translated = translateAnthropicSSE(currentEvent, currentData);
+            if (translated) {
+              if (translated.data === "[DONE]") {
+                clientRes.write("data: [DONE]\n\n");
+              } else {
+                clientRes.write(`data: ${JSON.stringify(translated.data)}\n\n`);
+              }
+            }
+          } else {
+            // OpenAI format - pass through with model rewrite
+            if (currentData.model) {
+              currentData.model = ourModelId;
+            }
+            if (currentData.usage) {
+              usage.tokensIn = currentData.usage.prompt_tokens;
+              usage.tokensOut = currentData.usage.completion_tokens;
+            }
+            clientRes.write(`data: ${JSON.stringify(currentData)}\n\n`);
+          }
+          currentEvent = "";
+          currentData = null;
+        } else if (line.trim() === "") {
+          // Empty line without event/data - pass through
           clientRes.write("\n");
+        } else if (line.trim() && !line.startsWith("event:") && !line.startsWith("data:")) {
+          // Pass through other SSE lines (id:, comments, etc.)
+          clientRes.write(`${line}\n`);
         }
       }
     }
@@ -133,11 +232,45 @@ async function readWithStallDetection(
 }
 
 /**
+ * Translate Anthropic non-streaming response to OpenAI format.
+ */
+function translateAnthropicResponse(anthropicResponse: any, ourModelId: string): any {
+  const content = Array.isArray(anthropicResponse.content)
+    ? anthropicResponse.content.map((c: any) => c.text ?? c.input ?? "").join("")
+    : anthropicResponse.content;
+
+  return {
+    id: `chatcmpl-${Date.now()}`,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: ourModelId,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content,
+        },
+        finish_reason: anthropicResponse.stop_reason,
+      },
+    ],
+    usage: {
+      prompt_tokens: anthropicResponse.usage?.input_tokens ?? 0,
+      completion_tokens: anthropicResponse.usage?.output_tokens ?? 0,
+      total_tokens:
+        (anthropicResponse.usage?.input_tokens ?? 0) +
+        (anthropicResponse.usage?.output_tokens ?? 0),
+    },
+  };
+}
+
+/**
  * Read a non-streaming response body and rewrite the model field.
  */
 export async function readNonStreamingResponse(
   upstreamResponse: Response,
-  ourModelId: string
+  ourModelId: string,
+  isAnthropic: boolean = false
 ): Promise<{
   body: string;
   tokensIn?: number;
@@ -147,6 +280,16 @@ export async function readNonStreamingResponse(
 
   try {
     const parsed = JSON.parse(text);
+
+    if (isAnthropic) {
+      const translated = translateAnthropicResponse(parsed, ourModelId);
+      return {
+        body: JSON.stringify(translated),
+        tokensIn: translated.usage.prompt_tokens,
+        tokensOut: translated.usage.completion_tokens,
+      };
+    }
+
     if (parsed.model) {
       parsed.model = ourModelId;
     }

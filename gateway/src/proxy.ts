@@ -19,8 +19,13 @@ import {
   UpstreamHttpError,
   checkResponseRetryable,
 } from "./retry.js";
+import {
+  insertRequest,
+  completeRequest,
+  recordModelError,
+  recordModelSuccess,
+} from "./db.js";
 import { setSSEHeaders, streamResponse, readNonStreamingResponse } from "./streaming.js";
-import { insertRequest, completeRequest } from "./db.js";
 import { log } from "./logger.js";
 
 interface ChatCompletionRequest {
@@ -103,6 +108,51 @@ function hasImageContent(messages: any[]): boolean {
 }
 
 /**
+ * Translate OpenAI-style request to Anthropic format.
+ */
+function translateToAnthropic(body: ChatCompletionRequest): any {
+  const messages = [...body.messages];
+  let system: string | undefined;
+
+  // Extract system message if present
+  const systemIdx = messages.findIndex((m) => m.role === "system");
+  if (systemIdx >= 0) {
+    const sysMsg = messages[systemIdx];
+    system = typeof sysMsg.content === "string" ? sysMsg.content : "";
+    messages.splice(systemIdx, 1);
+  }
+
+  // Convert tools format: OpenAI -> Anthropic
+  let tools = body.tools;
+  if (tools) {
+    tools = tools.map((t: any) => ({
+      name: t.function?.name ?? t.name,
+      description: t.function?.description ?? t.description,
+      input_schema: {
+        type: "object",
+        properties: t.function?.parameters?.properties ?? t.input_schema?.properties ?? {},
+        required: t.function?.parameters?.required ?? t.input_schema?.required ?? [],
+      },
+    }));
+  }
+
+  return {
+    model: body.model,
+    max_tokens: body.max_tokens ?? body.maxTokens ?? 4096,
+    messages: messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    })),
+    system,
+    temperature: body.temperature,
+    top_p: body.top_p,
+    stop: body.stop,
+    tools,
+    stream: body.stream,
+  };
+}
+
+/**
  * Build the upstream fetch request.
  */
 function buildUpstreamRequest(
@@ -110,8 +160,11 @@ function buildUpstreamRequest(
   provider: ResolvedProviderConfig,
   model: ResolvedModelConfig
 ): { url: string; init: RequestInit } {
-  // Replace our model key with the upstream modelId
-  const upstreamBody = { ...body, model: model.modelId };
+  // For Anthropic, translate the request format
+  const isAnthropic = provider.name === "anthropic";
+  const upstreamBody = isAnthropic
+    ? translateToAnthropic(body)
+    : { ...body, model: model.modelId };
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -120,11 +173,17 @@ function buildUpstreamRequest(
   // Set auth header
   if (provider.authHeader === "x-api-key") {
     headers["x-api-key"] = provider.apiKey;
+    // Add Anthropic version header for Anthropic provider
+    if (provider.anthropicVersion) {
+      headers["anthropic-version"] = provider.anthropicVersion;
+    }
   } else {
     headers[provider.authHeader] = `Bearer ${provider.apiKey}`;
   }
 
-  const url = `${provider.baseUrl}/chat/completions`;
+  // Anthropic uses /v1/messages, others use /v1/chat/completions
+  const endpoint = isAnthropic ? "/v1/messages" : "/v1/chat/completions";
+  const url = `${provider.baseUrl}${endpoint}`;
 
   return {
     url,
@@ -135,6 +194,142 @@ function buildUpstreamRequest(
       signal: AbortSignal.timeout(provider.timeout),
     },
   };
+}
+
+/**
+ * Translate Anthropic response to OpenAI format.
+ */
+function translateAnthropicToOpenAI(anthropicResponse: any): any {
+  // Handle streaming delta format
+  if (anthropicResponse.type === "message_start") {
+    return {
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: anthropicResponse.message?.model ?? "unknown",
+      choices: [
+        {
+          index: 0,
+          delta: { role: "assistant" },
+        },
+      ],
+    };
+  }
+
+  if (anthropicResponse.type === "content_block_start") {
+    return {
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "unknown",
+      choices: [
+        {
+          index: 0,
+          delta: { content: "" },
+        },
+      ],
+    };
+  }
+
+  if (anthropicResponse.type === "content_block_delta") {
+    const delta = anthropicResponse.delta;
+    if (delta.type === "text_delta") {
+      return {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "unknown",
+        choices: [
+          {
+            index: 0,
+            delta: { content: delta.text },
+          },
+        ],
+      };
+    }
+    if (delta.type === "input_json_delta") {
+      return {
+        id: `chatcmpl-${Date.now()}`,
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: "unknown",
+        choices: [
+          {
+            index: 0,
+            delta: { content: delta.partial_json },
+          },
+        ],
+      };
+    }
+  }
+
+  if (anthropicResponse.type === "content_block_stop") {
+    return {
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "unknown",
+      choices: [
+        {
+          index: 0,
+          delta: {},
+        },
+      ],
+    };
+  }
+
+  if (anthropicResponse.type === "message_delta") {
+    return {
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "unknown",
+      choices: [
+        {
+          index: 0,
+          delta: {},
+          finish_reason: anthropicResponse.delta?.stop_reason,
+        },
+      ],
+    };
+  }
+
+  if (anthropicResponse.type === "message_stop") {
+    return "[DONE]";
+  }
+
+  // Non-streaming response
+  if (anthropicResponse.content) {
+    const content = Array.isArray(anthropicResponse.content)
+      ? anthropicResponse.content.map((c: any) => c.text ?? c.input ?? "").join("")
+      : anthropicResponse.content;
+
+    return {
+      id: `chatcmpl-${Date.now()}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: anthropicResponse.model ?? "unknown",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content,
+          },
+          finish_reason: anthropicResponse.stop_reason,
+        },
+      ],
+      usage: {
+        prompt_tokens: anthropicResponse.usage?.input_tokens ?? 0,
+        completion_tokens: anthropicResponse.usage?.output_tokens ?? 0,
+        total_tokens:
+          (anthropicResponse.usage?.input_tokens ?? 0) +
+          (anthropicResponse.usage?.output_tokens ?? 0),
+      },
+    };
+  }
+
+  return anthropicResponse;
 }
 
 /**
@@ -230,7 +425,7 @@ export async function handleChatCompletions(
         res,
         lastError.status === 504
           ? timeoutError(errMsg)
-          : upstreamError(errMsg, lastError.status, lastError.responseBody)
+          : upstreamError(errMsg, lastError.status, lastError.responseBody, lastError.retryable)
       );
     } else {
       sendError(res, upstreamError(errMsg));
@@ -258,73 +453,91 @@ async function attemptModel(
     requestId,
   };
 
-  const upstreamResponse = await withRetry(
-    async () => {
-      const { url, init } = buildUpstreamRequest(body, entry.provider, entry.model);
-      log.info(entry.key, `→ ${init.method} ${url} (stream: ${isStream})`);
-      let response: Response;
-      try {
-        response = await fetch(url, init);
-      } catch (err: any) {
-        if (err.name === "TimeoutError" || err.name === "AbortError") {
-          throw new UpstreamHttpError(504, "Request timed out");
+  let lastError: unknown;
+
+  try {
+    const { value: upstreamResponse, retryCount } = await withRetry(
+      async () => {
+        const { url, init } = buildUpstreamRequest(body, entry.provider, entry.model);
+        log.info(entry.key, `→ ${init.method} ${url} (stream: ${isStream})`);
+        let response: Response;
+        try {
+          response = await fetch(url, init);
+        } catch (err: any) {
+          if (err.name === "TimeoutError" || err.name === "AbortError") {
+            throw new UpstreamHttpError(504, "Request timed out");
+          }
+          throw err;
         }
-        throw err;
-      }
-      if (!response.ok) {
-        const { retryable, retryAfterMs } = checkResponseRetryable(response);
-        const responseBody = await response.text();
-        if (retryable) {
-          throw new UpstreamHttpError(response.status, responseBody, retryAfterMs);
+        if (!response.ok) {
+          const { retryable, retryAfterMs } = checkResponseRetryable(response);
+          const responseBody = await response.text();
+          if (retryable) {
+            throw new UpstreamHttpError(response.status, responseBody, retryAfterMs);
+          }
+          throw new UpstreamHttpError(response.status, responseBody);
         }
-        throw new UpstreamHttpError(response.status, responseBody);
+        return response;
+      },
+      retryParams,
+      retryCtx,
+      (err) => {
+        if (err instanceof UpstreamHttpError) return err.retryable;
+        return (
+          err instanceof Error &&
+          (err.message.includes("fetch failed") ||
+            err.message.includes("ECONNREFUSED") ||
+            err.message.includes("ECONNRESET") ||
+            err.message.includes("ETIMEDOUT") ||
+            err.message.includes("socket hang up"))
+        );
       }
-      return response;
-    },
-    retryParams,
-    retryCtx,
-    (err) => {
-      if (err instanceof UpstreamHttpError) return err.retryable;
-      return (
-        err instanceof Error &&
-        (err.message.includes("fetch failed") ||
-          err.message.includes("ECONNREFUSED") ||
-          err.message.includes("ECONNRESET") ||
-          err.message.includes("ETIMEDOUT") ||
-          err.message.includes("socket hang up"))
+    );
+
+    // Success — record success for circuit breaker
+    recordModelSuccess(entry.provider.name, entry.model.modelId);
+
+    // Check if this is an Anthropic provider
+    const isAnthropic = entry.provider.name === "anthropic";
+
+    // Success — proxy the response
+    if (isStream) {
+      setSSEHeaders(res);
+      const usage = await streamResponse(upstreamResponse, res, entry.key, entry.provider.timeout ?? 60_000, isAnthropic);
+      const latency = Date.now() - startTime;
+      completeRequest(requestId, "success", latency, {
+        tokensIn: usage.tokensIn,
+        tokensOut: usage.tokensOut,
+        retryCount,
+      });
+      log.info(entry.key, `← stream complete (${latency}ms)`);
+    } else {
+      const { body: responseBody, tokensIn, tokensOut } =
+        await readNonStreamingResponse(upstreamResponse, entry.key, isAnthropic);
+      const latency = Date.now() - startTime;
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(responseBody);
+      completeRequest(requestId, "success", latency, {
+        tokensIn,
+        tokensOut,
+        retryCount,
+      });
+      log.info(
+        entry.key,
+        `← ${upstreamResponse.status} (${latency}ms, in:${tokensIn ?? "?"} out:${tokensOut ?? "?"})`
       );
     }
-  );
-
-  // Success — proxy the response
-  if (isStream) {
-    setSSEHeaders(res);
-    const usage = await streamResponse(upstreamResponse, res, entry.key, entry.provider.timeout ?? 60_000);
-    const latency = Date.now() - startTime;
-    completeRequest(requestId, "success", latency, {
-      tokensIn: usage.tokensIn,
-      tokensOut: usage.tokensOut,
-      retryCount: 0, // TODO: track actual retry count
-    });
-    log.info(entry.key, `← stream complete (${latency}ms)`);
-  } else {
-    const { body: responseBody, tokensIn, tokensOut } =
-      await readNonStreamingResponse(upstreamResponse, entry.key);
-    const latency = Date.now() - startTime;
-    res.writeHead(200, {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    });
-    res.end(responseBody);
-    completeRequest(requestId, "success", latency, {
-      tokensIn,
-      tokensOut,
-      retryCount: 0,
-    });
-    log.info(
-      entry.key,
-      `← ${upstreamResponse.status} (${latency}ms, in:${tokensIn ?? "?"} out:${tokensOut ?? "?"})`
-    );
+  } catch (err) {
+    lastError = err;
+    // Record error for circuit breaker
+    const isBlacklisted = recordModelError(entry.provider.name, entry.model.modelId);
+    if (isBlacklisted) {
+      log.warn(entry.key, `Model blacklisted due to repeated errors`);
+    }
+    throw err;
   }
 }
 

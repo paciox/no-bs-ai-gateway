@@ -107,6 +107,15 @@ export function modelGone(model: string): GatewayError {
   );
 }
 
+export function modelBlacklisted(model: string): GatewayError {
+  return createError(
+    "model_gone",
+    `Model "${model}" is temporarily unavailable due to repeated errors (circuit breaker)`,
+    503,
+    { code: "model_blacklisted", retryable: true }
+  );
+}
+
 export function capabilityError(
   model: string,
   capability: string

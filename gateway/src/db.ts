@@ -50,6 +50,15 @@ export function initDb(dbPath?: string): Database.Database {
       PRIMARY KEY (provider, model_id)
     );
 
+    CREATE TABLE IF NOT EXISTS circuit_breaker (
+      provider TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      last_error_time TEXT,
+      blacklisted_until TEXT,
+      PRIMARY KEY (provider, model_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp);
     CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model);
     CREATE INDEX IF NOT EXISTS idx_errors_timestamp ON errors(timestamp);
@@ -174,6 +183,77 @@ export function getModelStatus(
     | undefined;
   if (!row) return null;
   return { available: row.available === 1, last_error: row.last_error };
+}
+
+// ─── Circuit breaker functions ───────────────────────────────────────────────
+
+const CIRCUIT_BREAKER_THRESHOLD = 3; // errors before blacklisting
+const CIRCUIT_BREAKER_DURATION_MS = 5 * 60 * 1000; // 5 minutes blacklist
+
+export function recordModelError(provider: string, modelId: string): boolean {
+  const now = new Date().toISOString();
+  const db = getDb();
+
+  // Check current state
+  const row = db
+    .prepare(
+      `SELECT error_count, blacklisted_until FROM circuit_breaker WHERE provider = ? AND model_id = ?`
+    )
+    .get(provider, modelId) as
+    | { error_count: number; blacklisted_until: string | null }
+    | undefined;
+
+  if (row) {
+    const errorCount = row.error_count + 1;
+    const blacklistedUntil =
+      errorCount >= CIRCUIT_BREAKER_THRESHOLD
+        ? new Date(Date.now() + CIRCUIT_BREAKER_DURATION_MS).toISOString()
+        : row.blacklisted_until;
+
+    db.prepare(
+      `UPDATE circuit_breaker SET error_count = ?, last_error_time = ?, blacklisted_until = ? WHERE provider = ? AND model_id = ?`
+    ).run(errorCount, now, blacklistedUntil, provider, modelId);
+
+    return blacklistedUntil !== null;
+  } else {
+    // First error - insert with count 1
+    db.prepare(
+      `INSERT INTO circuit_breaker (provider, model_id, error_count, last_error_time, blacklisted_until) VALUES (?, ?, 1, ?, NULL)`
+    ).run(provider, modelId, now);
+    return false;
+  }
+}
+
+export function isModelBlacklisted(provider: string, modelId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT blacklisted_until FROM circuit_breaker WHERE provider = ? AND model_id = ?`
+    )
+    .get(provider, modelId) as { blacklisted_until: string | null } | undefined;
+
+  if (!row || !row.blacklisted_until) return false;
+
+  const blacklistedUntil = new Date(row.blacklisted_until);
+  if (blacklistedUntil > new Date()) {
+    return true;
+  }
+
+  // Blacklist expired - clear it
+  clearCircuitBreaker(provider, modelId);
+  return false;
+}
+
+export function clearCircuitBreaker(provider: string, modelId: string): void {
+  getDb()
+    .prepare(
+      `DELETE FROM circuit_breaker WHERE provider = ? AND model_id = ?`
+    )
+    .run(provider, modelId);
+}
+
+export function recordModelSuccess(provider: string, modelId: string): void {
+  // Reset error count on success
+  clearCircuitBreaker(provider, modelId);
 }
 
 // ─── Query helpers for UI API ────────────────────────────────────────────────

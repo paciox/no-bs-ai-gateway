@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ResolvedConfig } from "./config.js";
 import { resolveModel, isGatewayError, listAllEntries, listAvailableModelKeys } from "./registry.js";
 import { handleChatCompletions } from "./proxy.js";
+import { handleEmbeddings } from "./embeddings.js";
 import { handleListModels } from "./models.js";
 import {
   sendError,
@@ -165,7 +166,94 @@ async function handleRequest(
     return;
   }
 
-  // ── API endpoints for UI ────────────────────────────────────────────────
+  // ── POST /v1/messages (Anthropic compatibility) ─────────────────────────
+  if (
+    method === "POST" &&
+    (path === "/v1/messages" || path === "/messages")
+  ) {
+    let rawBody: Buffer;
+    try {
+      rawBody = await readBody(req, config.maxBodySize ?? MAX_BODY_DEFAULT);
+    } catch (err: any) {
+      sendError(res, invalidRequest(err.message));
+      return;
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody.toString("utf-8"));
+    } catch {
+      sendError(res, invalidRequest("Invalid JSON in request body"));
+      return;
+    }
+
+    // Validate required fields for Anthropic format
+    if (!body.model || typeof body.model !== "string") {
+      sendError(res, invalidRequest("'model' field is required and must be a string"));
+      return;
+    }
+    if (!body.messages || !Array.isArray(body.messages)) {
+      sendError(res, invalidRequest("'messages' field is required and must be an array"));
+      return;
+    }
+
+    // Resolve model
+    const result = resolveModel(body.model);
+    if (isGatewayError(result)) {
+      sendError(res, result);
+      return;
+    }
+
+    // Convert Anthropic format to OpenAI format for internal processing
+    const openaiBody = {
+      ...body,
+      messages: body.messages,
+      stream: body.stream,
+      temperature: body.temperature,
+      top_p: body.top_p,
+      stop: body.stop,
+      max_tokens: body.max_tokens,
+    };
+
+    await handleChatCompletions(openaiBody, result, res, config);
+    return;
+  }
+
+  // ── POST /v1/embeddings ─────────────────────────────────────────────────
+  if (
+    method === "POST" &&
+    (path === "/v1/embeddings" || path === "/embeddings")
+  ) {
+    let rawBody: Buffer;
+    try {
+      rawBody = await readBody(req, config.maxBodySize ?? MAX_BODY_DEFAULT);
+    } catch (err: any) {
+      sendError(res, invalidRequest(err.message));
+      return;
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody.toString("utf-8"));
+    } catch {
+      sendError(res, invalidRequest("Invalid JSON in request body"));
+      return;
+    }
+
+    if (!body.model || typeof body.model !== "string") {
+      sendError(res, invalidRequest("'model' field is required and must be a string"));
+      return;
+    }
+
+    const result = resolveModel(body.model);
+    if (isGatewayError(result)) {
+      sendError(res, result);
+      return;
+    }
+
+    await handleEmbeddings(body, result, res);
+    return;
+  }
 
   if (method === "GET" && path === "/api/stats") {
     sendJson(res, 200, getStats());
