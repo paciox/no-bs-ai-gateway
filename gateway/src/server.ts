@@ -68,6 +68,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
 // ─── UI serving ──────────────────────────────────────────────────────────────
 
 let cachedUiHtml: string | null = null;
+let cachedChatHtml: string | null = null;
 
 function getUiHtml(): string {
   if (cachedUiHtml) return cachedUiHtml;
@@ -78,6 +79,18 @@ function getUiHtml(): string {
     return cachedUiHtml;
   } catch {
     return "<html><body><h1>No-BS AI Gateway</h1><p>UI file not found. Place index.html in src/ui/</p></body></html>";
+  }
+}
+
+function getChatHtml(): string {
+  if (cachedChatHtml) return cachedChatHtml;
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const uiPath = resolve(__dirname, "ui", "chat.html");
+    cachedChatHtml = readFileSync(uiPath, "utf-8");
+    return cachedChatHtml;
+  } catch {
+    return "<html><body><h1>Chat UI not found</h1><p>Place chat.html in src/ui/</p></body></html>";
   }
 }
 
@@ -105,6 +118,13 @@ async function handleRequest(
   if (method === "GET" && path === "/") {
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(getUiHtml());
+    return;
+  }
+
+  // ── GET /chat → Chat UI ─────────────────────────────────────────────────
+  if (method === "GET" && path === "/chat") {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(getChatHtml());
     return;
   }
 
@@ -346,4 +366,5 @@ export function createGatewayServer(config: ResolvedConfig) {
  */
 export function invalidateUiCache(): void {
   cachedUiHtml = null;
+  cachedChatHtml = null;
 }

@@ -113,7 +113,7 @@ export async function streamResponse(
   ourModelId: string,
   stallTimeoutMs: number = DEFAULT_STALL_TIMEOUT_MS,
   isAnthropic: boolean = false
-): Promise<{ tokensIn?: number; tokensOut?: number }> {
+): Promise<{ tokensIn?: number; tokensOut?: number; content?: string }> {
   const body = upstreamResponse.body;
   if (!body) {
     clientRes.write(
@@ -128,6 +128,12 @@ export async function streamResponse(
   const decoder = new TextDecoder();
   let buffer = "";
   let usage = { tokensIn: undefined as number | undefined, tokensOut: undefined as number | undefined };
+  const contentParts: string[] = [];
+
+  // Keep currentEvent/currentData outside the chunk loop so a message
+  // that spans two network chunks is still processed correctly.
+  let currentEvent = "";
+  let currentData: any = null;
 
   try {
     while (true) {
@@ -140,29 +146,35 @@ export async function streamResponse(
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? ""; // keep incomplete line in buffer
 
-      let currentEvent = "";
-      let currentData: any = null;
-
       for (const line of lines) {
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data: ")) {
-          const jsonStr = line.slice(6);
-          try {
-            currentData = JSON.parse(jsonStr);
-          } catch {
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") {
+            clientRes.write("data: [DONE]\n\n");
+            currentEvent = "";
             currentData = null;
+          } else {
+            try {
+              currentData = JSON.parse(jsonStr);
+            } catch {
+              currentData = null;
+            }
           }
-        } else if (line.trim() === "" && currentEvent && currentData !== null) {
-          // Empty line signals end of SSE message
+        } else if (line.trim() === "" && currentData !== null) {
+          // Empty line signals end of SSE message (currentEvent is optional —
+          // standard OpenAI SSE does NOT include an event: line).
           if (isAnthropic) {
             const translated = translateAnthropicSSE(currentEvent, currentData);
             if (translated) {
               if (translated.data === "[DONE]") {
                 clientRes.write("data: [DONE]\n\n");
               } else {
-                log.streamChunk(ourModelId, ourModelId, currentEvent, 
-                  translated.data.choices?.[0]?.delta?.content?.substring(0, 100));
+                const deltaContent = translated.data.choices?.[0]?.delta?.content;
+                if (deltaContent) contentParts.push(deltaContent);
+                log.streamChunk(ourModelId, ourModelId, currentEvent || "message",
+                  deltaContent?.substring(0, 100));
                 clientRes.write(`data: ${JSON.stringify(translated.data)}\n\n`);
               }
             }
@@ -175,8 +187,10 @@ export async function streamResponse(
               usage.tokensIn = currentData.usage.prompt_tokens;
               usage.tokensOut = currentData.usage.completion_tokens;
             }
-            log.streamChunk(ourModelId, ourModelId, currentEvent || "message", 
-              currentData.choices?.[0]?.delta?.content?.substring(0, 100));
+            const deltaContent = currentData.choices?.[0]?.delta?.content;
+            if (deltaContent) contentParts.push(deltaContent);
+            log.streamChunk(ourModelId, ourModelId, currentEvent || "message",
+              deltaContent?.substring(0, 100));
             clientRes.write(`data: ${JSON.stringify(currentData)}\n\n`);
           }
           currentEvent = "";
@@ -206,7 +220,7 @@ export async function streamResponse(
     clientRes.end();
   }
 
-  return usage;
+  return { ...usage, content: contentParts.length > 0 ? contentParts.join("") : undefined };
 }
 
 /**

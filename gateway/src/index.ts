@@ -6,7 +6,7 @@ import { initDb, closeDb, pruneOldRecords } from "./db.js";
 import { buildRegistry } from "./registry.js";
 import { createGatewayServer, invalidateUiCache } from "./server.js";
 import { startScanner, stopScanner, scanAll } from "./scanner.js";
-import { log, setLogLevel } from "./logger.js";
+import { log, setLogLevel, configureFileLogging } from "./logger.js";
 
 // ─── Parse CLI args ──────────────────────────────────────────────────────────
 
@@ -41,6 +41,7 @@ async function main() {
     config = loadConfig(configPath);
     // Apply log level from config
     setLogLevel(config.logLevel);
+    configureFileLogging(config.logFile, config.logDir);
     log.startup("Config loaded successfully");
   } catch (err: any) {
     console.error(`\n❌ ${err.message}\n`);
@@ -79,6 +80,7 @@ async function main() {
       const newConfig = reloadConfig(configPath);
       config = newConfig;
       setLogLevel(config.logLevel);
+      configureFileLogging(config.logFile, config.logDir);
       buildRegistry(config);
       invalidateUiCache();
       // Re-scan with new config

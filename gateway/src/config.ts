@@ -52,6 +52,8 @@ export interface GatewayConfig {
   fallBackModality?: FallbackModality;
   fallbackLimit?: number; // max fallback hops after primary (0 = no fallback)
   logLevel?: LogLevel; // default "INFO"
+  logFile?: boolean; // write logs to file (default false)
+  logDir?: string; // directory for log files (default: process.cwd())
   streamStallTimeoutMs?: number; // SSE no-data timeout, default 60s
   scanTimeoutMs?: number; // upstream /models scan timeout, default 15s
   providers: Array<Record<string, ProviderConfig>>;
@@ -107,6 +109,8 @@ export interface ResolvedConfig {
   fallBackModality: FallbackModality;
   fallbackLimit: number;
   logLevel: LogLevel;
+  logFile: boolean;
+  logDir: string;
   streamStallTimeoutMs: number;
   scanTimeoutMs: number;
   providers: ResolvedProviderConfig[];
@@ -274,6 +278,8 @@ export function validateAndResolve(raw: GatewayConfig): ResolvedConfig {
     fallBackModality: raw.fallBackModality ?? "cascade",
     fallbackLimit: raw.fallbackLimit ?? 0,
     logLevel: raw.logLevel ?? "INFO",
+    logFile: raw.logFile ?? false,
+    logDir: raw.logDir ?? process.cwd(),
     streamStallTimeoutMs: raw.streamStallTimeoutMs ?? DEFAULT_STREAM_STALL_TIMEOUT_MS,
     scanTimeoutMs: raw.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
     providers,

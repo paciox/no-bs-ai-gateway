@@ -520,7 +520,7 @@ async function attemptModel(
         retryCount,
       });
       log.response(entry.key, entry.model.modelId, entry.provider.name, 
-        upstreamResponse.status, latency, usage.tokensIn, usage.tokensOut);
+        upstreamResponse.status, latency, usage.tokensIn, usage.tokensOut, usage.content);
       log.info(entry.key, `← stream complete (${latency}ms)`);
     } else {
       // For Anthropic: upstream is non-streaming, translate format.
@@ -539,8 +539,14 @@ async function attemptModel(
         tokensOut,
         retryCount,
       });
-      log.response(entry.key, entry.model.modelId, entry.provider.name, 
-        upstreamResponse.status, latency, tokensIn, tokensOut);
+      let contentPreview: string | undefined;
+      try {
+        const parsed = JSON.parse(responseBody);
+        const content = parsed.choices?.[0]?.message?.content;
+        if (typeof content === "string") contentPreview = content;
+      } catch { /* ignore */ }
+      log.responseRaw(entry.key, entry.model.modelId, entry.provider.name,
+        upstreamResponse.status, latency, responseBody, tokensIn, tokensOut, contentPreview);
       log.info(
         entry.key,
         `← ${upstreamResponse.status} (${latency}ms, in:${tokensIn ?? "?"} out:${tokensOut ?? "?"})`

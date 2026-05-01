@@ -395,9 +395,17 @@ You'll see:
 [2026-04-20T10:00:00.002Z] [INFO] [startup] Registry built: 3 enabled models, 0 disabled
 [2026-04-20T10:00:00.003Z] [INFO] [startup] Server listening on http://127.0.0.1:4000
 [2026-04-20T10:00:00.004Z] [INFO] [startup] Web UI:              http://127.0.0.1:4000/
+[2026-04-20T10:00:00.004Z] [INFO] [startup] Chat UI:             http://127.0.0.1:4000/chat
 [2026-04-20T10:00:00.005Z] [INFO] [startup] Models endpoint:     http://127.0.0.1:4000/v1/models
 [2026-04-20T10:00:00.006Z] [INFO] [startup] Chat completions:    http://127.0.0.1:4000/v1/chat/completions
 ```
+
+Then open in your browser:
+
+| URL | Description |
+|---|---|
+| `http://127.0.0.1:4000/` | Dashboard — models, request log, stats |
+| `http://127.0.0.1:4000/chat` | Chat UI — full chat interface with model selector |
 
 ### Test It
 
@@ -557,6 +565,23 @@ Open `http://127.0.0.1:4000/` in your browser:
 
 Auto-refreshes every 5 seconds. No configuration needed.
 
+### Chat Portal
+
+Open `http://127.0.0.1:4000/chat` in your browser for a full chat interface:
+
+- **Model selector** — dropdown grouped by provider. Lists all enabled models from the gateway config. Picks up changes after a page refresh.
+- **System prompt** — collapsible text area for a persistent system message prepended to every request.
+- **Parameter sliders** — temperature, max tokens, top-p, frequency penalty, presence penalty. All sliders are live and applied to the next request.
+- **Stop sequences** — comma-separated list of stop tokens injected into the request.
+- **Streaming toggle** — switch between SSE streaming (live token-by-token output with a blinking cursor) and standard non-streaming (waits for the full response).
+- **Markdown rendering** — toggle between rendered markdown and plain text. Rendering is applied on message finalisation, not during streaming.
+- **Multiple conversations** — sidebar lists all saved conversations. Each one is stored independently in `localStorage`. Rename or delete from the sidebar.
+- **Token stats** — input/output token counts shown per message and as a running session total in the header.
+- **Stop button** — abort an in-flight request mid-stream without reloading the page.
+- **Context hygiene** — empty assistant messages (from interrupted or failed requests) are automatically stripped from the conversation history before each API call so they don't pollute the model's context window.
+
+No login, no server state — all conversation history lives in your browser's `localStorage`.
+
 ---
 
 ## Config Reference
@@ -659,6 +684,7 @@ At `DEBUG` level, you'll additionally see:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Web dashboard |
+| `GET` | `/chat` | Chat portal — interactive chat UI with model selector, streaming, conversations |
 | `GET` | `/health` | Health check (uptime, model count) |
 | `GET` | `/v1/models` | OpenAI-compatible model list |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions proxy |
