@@ -9,7 +9,7 @@ Just wanted to put this here to let know who is making thousand of clone of rout
 
 # No-BS AI Gateway
 
-A single OpenAI-compatible endpoint that sits in front of multiple AI providers. One local URL for all your AI calls. No env vars, no magic routing, no "smart" fallbacks. You tell it which model to hit, it hits it.
+A single OpenAI-compatible endpoint that sits in front of multiple AI providers — including native Anthropic support. One local URL for all your AI calls. No env vars, no magic routing, no "smart" fallbacks. You tell it which model to hit, it hits it.
 
 ---
 
@@ -45,10 +45,11 @@ GET /v1/models              Returns your configured
 ```
 
 - **OpenAI-compatible endpoints** — `POST /v1/chat/completions` and `GET /v1/models`. Any tool that speaks OpenAI can point at this gateway.
+- **Anthropic provider support** — configure Anthropic (`api.anthropic.com`) as a provider and the gateway transparently translates your OpenAI-format requests into Anthropic's native `/v1/messages` format and back. Your client code never changes.
 - **Streaming and non-streaming** — SSE streaming proxied through with stall detection. If the upstream goes silent for 30 seconds, you get an error, not an infinite hang.
 - **Tool calling, images, thinking tokens** — passed through to the upstream provider as-is. The gateway checks the model's configured capabilities and rejects requests that use unsupported features *before* wasting an API call.
 - **Retry with backoff** — configurable per provider and per model. Model settings override provider settings. Retries on 429, 500, 502, 503, 504, and network errors. Never retries on 400, 401, 403.
-- **Model availability scanning** — on startup and every 30 minutes, the gateway calls each provider's `/models` endpoint and checks if your configured models still exist. Gone models get blocked with a clear `410 Gone` error.
+- **Model availability scanning** — on startup and every 30 minutes, the gateway calls each provider's `/models` endpoint and checks if your configured models still exist. Gone models get blocked with a clear `410 Gone` error. Anthropic is skipped during scans (no public `/models` endpoint); its models are treated as always available.
 - **Web dashboard** — dark-themed UI at `http://localhost:4000/` showing providers, models, request log, errors, and stats. Auto-refreshes every 5 seconds.
 - **SQLite logging** — every request and error stored locally. Auto-prunes after 7 days.
 - **Config hot-reload** — edit the config file while running. Changes are picked up automatically.
@@ -337,6 +338,33 @@ Edit `no-bs-ai-gateway.config.json` with your actual API keys and models:
           }
         ]
       }
+    },
+    {
+      "anthropic": {
+        "baseUrl": "https://api.anthropic.com/v1",
+        "apiKey": "sk-ant-YOUR_KEY_HERE",
+        "authHeader": "x-api-key",
+        "anthropicVersion": "2023-06-01",
+        "retries": 2,
+        "retriesDelayMs": 2000,
+        "timeout": 60000,
+        "enabled": true,
+        "models": [
+          {
+            "modelId": "claude-opus-4-6",
+            "enabled": true,
+            "contextWindow": 200000,
+            "maxTokens": 4096,
+            "capabilities": {
+              "tools": true,
+              "images": true,
+              "streaming": true,
+              "thinking": true,
+              "files": false
+            }
+          }
+        ]
+      }
     }
   ]
 }
@@ -480,6 +508,30 @@ curl http://127.0.0.1:4000/v1/chat/completions \
   }'
 ```
 
+**Anthropic — Claude Opus (text + images, tools, thinking)**
+```bash
+curl http://127.0.0.1:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-opus-4-6",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 200
+  }'
+```
+
+**Anthropic — Claude Sonnet (text + images, tools, thinking)**
+```bash
+curl http://127.0.0.1:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-sonnet-4-5",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 200
+  }'
+```
+
+> Anthropic requests are transparently translated: the gateway converts your OpenAI-format body to Anthropic's `/v1/messages` format, calls the API with `x-api-key` auth and the `anthropic-version` header, then translates the response back to OpenAI format before returning it to your client.
+
 **Streaming example (any model)**
 ```bash
 curl http://127.0.0.1:4000/v1/chat/completions \
@@ -537,6 +589,7 @@ Auto-refreshes every 5 seconds. No configuration needed.
 | `timeout` | number | `60000` | Upstream request timeout in ms |
 | `enabled` | boolean | required | Whether this provider is active |
 | `authHeader` | string | `"Authorization"` | Auth header name. Use `"x-api-key"` for Anthropic-style auth |
+| `anthropicVersion` | string | — | Anthropic API version header value (e.g. `"2023-06-01"`). Only needed for the Anthropic provider |
 | `models` | array | required | List of model configs |
 
 ### Model
