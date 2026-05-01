@@ -59,7 +59,7 @@ export async function handleEmbeddings(
         [authHeader]: authValue,
       },
       body: JSON.stringify(upstreamBody),
-      signal: AbortSignal.timeout(entry.provider.timeout ?? 60_000),
+      signal: AbortSignal.timeout(entry.provider.timeout),
     });
   } catch (err: any) {
     const latency = Date.now() - startTime;

@@ -521,6 +521,9 @@ Auto-refreshes every 5 seconds. No configuration needed.
 | `cascadeEnabled` | boolean | `false` | Enable fallback model rotation |
 | `fallBackModality` | string | `"cascade"` | Fallback strategy: `"cascade"` or `"model_specific"` |
 | `fallbackLimit` | number | `0` | Max fallback hops (0 = disabled) |
+| `logLevel` | string | `"INFO"` | Logging verbosity: `"SILENT"`, `"ERROR"`, `"WARN"`, `"INFO"`, `"VERBOSE"`, `"DEBUG"` |
+| `streamStallTimeoutMs` | number | `60000` | SSE no-data stall timeout — abort the stream if upstream goes silent for this long |
+| `scanTimeoutMs` | number | `15000` | Per-provider timeout for the upstream `/models` availability scan |
 | `providers` | array | required | List of provider entries |
 
 ### Provider
@@ -559,6 +562,42 @@ Auto-refreshes every 5 seconds. No configuration needed.
 | `streaming` | boolean | `true` | SSE streaming responses |
 | `thinking` | boolean | `false` | Thinking/reasoning tokens |
 | `files` | boolean | `false` | File attachments |
+
+---
+
+## Logging
+
+The gateway supports configurable log verbosity via the `logLevel` config field:
+
+| Level | Output |
+|-------|--------|
+| `SILENT` | No output except startup errors |
+| `ERROR` | Only errors |
+| `WARN` | Errors + warnings |
+| `INFO` | Errors + warnings + basic info (default) |
+| `VERBOSE` | INFO + request/response summaries, timing, token counts |
+| `DEBUG` | VERBOSE + full request/response bodies, headers, chunk content |
+
+**Example config with verbose logging:**
+```json
+{
+  "port": 4000,
+  "host": "127.0.0.1",
+  "logLevel": "VERBOSE",
+  "providers": [...]
+}
+```
+
+At `VERBOSE` level, you'll see:
+- Request timing and latency
+- Token input/output counts
+- Error response bodies
+
+At `DEBUG` level, you'll additionally see:
+- Full request bodies (truncated at 2000 chars)
+- Full response bodies (truncated at 2000 chars)
+- SSE chunk content previews
+- Sanitized headers (API keys masked)
 
 ---
 

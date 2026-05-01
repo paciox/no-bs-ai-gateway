@@ -1,6 +1,7 @@
 {
   "port": 4000,
   "host": "127.0.0.1",
+  "logLevel": "VERBOSE",
   "cascadeEnabled": false,
   "fallBackModality": "cascade",
   "fallbackLimit": 3,
@@ -11,7 +12,7 @@
         "apiKey": "sk-or-v1-.....",
         "retries": 2,
         "retriesDelayMs": 2000,
-        "timeout": 60000,
+        "timeout": 600000,
         "enabled": true,
         "models": [
           {
@@ -132,6 +133,20 @@
             "fallbackOrder": 9,
             "contextWindow": 131100,
             "maxTokens": 8200,
+            "capabilities": {
+              "tools": true,
+              "images": false,
+              "streaming": true,
+              "thinking": false,
+              "files": false
+            }
+          },
+          {
+            "modelId": "openrouter/owl-alpha",
+            "enabled": true,
+            "fallbackOrder": 10,
+            "contextWindow": 1050000,
+            "maxTokens": 262100,
             "capabilities": {
               "tools": true,
               "images": false,
@@ -339,11 +354,11 @@
     },
     {
       "anthropic": {
-        "baseUrl": "https://api.anthropic.com",
+        "baseUrl": "https://api.anthropic.com/v1",
         "apiKey": "YOUR_ANTHROPIC_API_KEY_HERE",
         "retries": 2,
         "retriesDelayMs": 2000,
-        "timeout": 60000,
+        "timeout": 600000,
         "authHeader": "x-api-key",
         "anthropicVersion": "2023-06-01",
         "enabled": true,

@@ -25,7 +25,7 @@ import {
   recordModelError,
   recordModelSuccess,
 } from "./db.js";
-import { setSSEHeaders, streamResponse, readNonStreamingResponse } from "./streaming.js";
+import { setSSEHeaders, streamResponse, readNonStreamingResponse, bufferStreamToNonStreaming } from "./streaming.js";
 import { log } from "./logger.js";
 
 interface ChatCompletionRequest {
@@ -162,9 +162,13 @@ function buildUpstreamRequest(
 ): { url: string; init: RequestInit } {
   // For Anthropic, translate the request format
   const isAnthropic = provider.name === "anthropic";
+  // For non-Anthropic providers (NVIDIA, OpenRouter), always force streaming
+  // upstream so the connection stays alive and NGINX doesn't 504 before the
+  // model finishes generating. We buffer the SSE chunks when the client
+  // requested non-streaming (see attemptModel below).
   const upstreamBody = isAnthropic
     ? translateToAnthropic(body)
-    : { ...body, model: model.modelId };
+    : { ...body, model: model.modelId, stream: true };
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -181,8 +185,9 @@ function buildUpstreamRequest(
     headers[provider.authHeader] = `Bearer ${provider.apiKey}`;
   }
 
-  // Anthropic uses /v1/messages, others use /v1/chat/completions
-  const endpoint = isAnthropic ? "/v1/messages" : "/v1/chat/completions";
+  // Anthropic uses /messages, others use /chat/completions.
+  // baseUrl is normalized by config.ts to always end with a version segment (e.g. /v1).
+  const endpoint = isAnthropic ? "/messages" : "/chat/completions";
   const url = `${provider.baseUrl}${endpoint}`;
 
   return {
@@ -370,7 +375,7 @@ export async function handleChatCompletions(
   let headersSent = false;
 
   try {
-    await attemptModel(body, entry, res, isStream, requestId);
+    await attemptModel(body, entry, res, isStream, requestId, config);
     return; // success — done
   } catch (err) {
     lastError = err;
@@ -406,7 +411,7 @@ export async function handleChatCompletions(
       log.info(candidate.key, `Fallback attempt (order ${candidate.model.fallbackOrder ?? "n/a"})`);
 
       try {
-        await attemptModel(body, candidate, res, isStream, requestId);
+        await attemptModel(body, candidate, res, isStream, requestId, config);
         return; // success on fallback — done
       } catch (err) {
         lastError = err;
@@ -443,7 +448,8 @@ async function attemptModel(
   entry: RegistryEntry,
   res: ServerResponse,
   isStream: boolean,
-  requestId: number
+  requestId: number,
+  config: ResolvedConfig
 ): Promise<void> {
   const startTime = Date.now();
   const retryParams = resolveRetryParams(entry.provider, entry.model);
@@ -459,7 +465,8 @@ async function attemptModel(
     const { value: upstreamResponse, retryCount } = await withRetry(
       async () => {
         const { url, init } = buildUpstreamRequest(body, entry.provider, entry.model);
-        log.info(entry.key, `→ ${init.method} ${url} (stream: ${isStream})`);
+        log.request(entry.key, entry.model.modelId, entry.provider.name, url, 
+          JSON.parse(init.body as string), init.headers as Record<string, string>);
         let response: Response;
         try {
           response = await fetch(url, init);
@@ -472,6 +479,8 @@ async function attemptModel(
         if (!response.ok) {
           const { retryable, retryAfterMs } = checkResponseRetryable(response);
           const responseBody = await response.text();
+          log.errorResponse(entry.key, entry.model.modelId, entry.provider.name, 
+            response.status, response.statusText, responseBody);
           if (retryable) {
             throw new UpstreamHttpError(response.status, responseBody, retryAfterMs);
           }
@@ -503,17 +512,22 @@ async function attemptModel(
     // Success — proxy the response
     if (isStream) {
       setSSEHeaders(res);
-      const usage = await streamResponse(upstreamResponse, res, entry.key, entry.provider.timeout ?? 60_000, isAnthropic);
+      const usage = await streamResponse(upstreamResponse, res, entry.key, config.streamStallTimeoutMs, isAnthropic);
       const latency = Date.now() - startTime;
       completeRequest(requestId, "success", latency, {
         tokensIn: usage.tokensIn,
         tokensOut: usage.tokensOut,
         retryCount,
       });
+      log.response(entry.key, entry.model.modelId, entry.provider.name, 
+        upstreamResponse.status, latency, usage.tokensIn, usage.tokensOut);
       log.info(entry.key, `← stream complete (${latency}ms)`);
     } else {
-      const { body: responseBody, tokensIn, tokensOut } =
-        await readNonStreamingResponse(upstreamResponse, entry.key, isAnthropic);
+      // For Anthropic: upstream is non-streaming, translate format.
+      // For others: upstream is streaming (we forced it), buffer into JSON.
+      const { body: responseBody, tokensIn, tokensOut } = isAnthropic
+        ? await readNonStreamingResponse(upstreamResponse, entry.key, true)
+        : await bufferStreamToNonStreaming(upstreamResponse, entry.key, config.streamStallTimeoutMs);
       const latency = Date.now() - startTime;
       res.writeHead(200, {
         "Content-Type": "application/json",
@@ -525,6 +539,8 @@ async function attemptModel(
         tokensOut,
         retryCount,
       });
+      log.response(entry.key, entry.model.modelId, entry.provider.name, 
+        upstreamResponse.status, latency, tokensIn, tokensOut);
       log.info(
         entry.key,
         `← ${upstreamResponse.status} (${latency}ms, in:${tokensIn ?? "?"} out:${tokensOut ?? "?"})`

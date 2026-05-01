@@ -161,6 +161,8 @@ export async function streamResponse(
               if (translated.data === "[DONE]") {
                 clientRes.write("data: [DONE]\n\n");
               } else {
+                log.streamChunk(ourModelId, ourModelId, currentEvent, 
+                  translated.data.choices?.[0]?.delta?.content?.substring(0, 100));
                 clientRes.write(`data: ${JSON.stringify(translated.data)}\n\n`);
               }
             }
@@ -173,6 +175,8 @@ export async function streamResponse(
               usage.tokensIn = currentData.usage.prompt_tokens;
               usage.tokensOut = currentData.usage.completion_tokens;
             }
+            log.streamChunk(ourModelId, ourModelId, currentEvent || "message", 
+              currentData.choices?.[0]?.delta?.content?.substring(0, 100));
             clientRes.write(`data: ${JSON.stringify(currentData)}\n\n`);
           }
           currentEvent = "";
@@ -262,6 +266,84 @@ function translateAnthropicResponse(anthropicResponse: any, ourModelId: string):
         (anthropicResponse.usage?.output_tokens ?? 0),
     },
   };
+}
+
+/**
+ * Buffer an upstream SSE stream into a single non-streaming OpenAI response.
+ * Used when we force stream=true upstream (to keep the connection alive and
+ * avoid NGINX 504s on slow models) but the client requested non-streaming.
+ */
+export async function bufferStreamToNonStreaming(
+  upstreamResponse: Response,
+  ourModelId: string,
+  stallTimeoutMs: number = DEFAULT_STALL_TIMEOUT_MS,
+): Promise<{ body: string; tokensIn?: number; tokensOut?: number }> {
+  const body = upstreamResponse.body;
+  if (!body) throw new Error("Empty upstream response body");
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let rawBuffer = "";
+
+  let id = `chatcmpl-${Date.now()}`;
+  let created = Math.floor(Date.now() / 1000);
+  const contentParts: string[] = [];
+  let finishReason: string | null = null;
+  let tokensIn: number | undefined;
+  let tokensOut: number | undefined;
+
+  try {
+    while (true) {
+      const { done, value } = await readWithStallDetection(reader, stallTimeoutMs);
+      if (done) break;
+
+      rawBuffer += decoder.decode(value, { stream: true });
+      const lines = rawBuffer.split("\n");
+      rawBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6).trim();
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const evt = JSON.parse(jsonStr);
+          if (evt.id) id = evt.id;
+          if (evt.created) created = evt.created;
+          const delta = evt.choices?.[0]?.delta;
+          if (delta?.content) contentParts.push(delta.content);
+          const fr = evt.choices?.[0]?.finish_reason;
+          if (fr) finishReason = fr;
+          if (evt.usage) {
+            tokensIn = evt.usage.prompt_tokens;
+            tokensOut = evt.usage.completion_tokens;
+          }
+        } catch { /* skip unparseable chunk */ }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+
+  const assembled = {
+    id,
+    object: "chat.completion",
+    created,
+    model: ourModelId,
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content: contentParts.join("") },
+      finish_reason: finishReason,
+    }],
+    ...(tokensIn !== undefined && {
+      usage: {
+        prompt_tokens: tokensIn,
+        completion_tokens: tokensOut ?? 0,
+        total_tokens: (tokensIn ?? 0) + (tokensOut ?? 0),
+      },
+    }),
+  };
+
+  return { body: JSON.stringify(assembled), tokensIn, tokensOut };
 }
 
 /**

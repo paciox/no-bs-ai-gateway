@@ -1,6 +1,7 @@
 // ─── Config types & loader ───────────────────────────────────────────────────
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { LogLevel } from "./logger.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,9 @@ export interface GatewayConfig {
   cascadeEnabled?: boolean;
   fallBackModality?: FallbackModality;
   fallbackLimit?: number; // max fallback hops after primary (0 = no fallback)
+  logLevel?: LogLevel; // default "INFO"
+  streamStallTimeoutMs?: number; // SSE no-data timeout, default 60s
+  scanTimeoutMs?: number; // upstream /models scan timeout, default 15s
   providers: Array<Record<string, ProviderConfig>>;
 }
 
@@ -61,6 +65,8 @@ const DEFAULT_MAX_BODY_SIZE = 50 * 1024 * 1024; // 50MB
 const DEFAULT_DB_RETENTION_DAYS = 7;
 const DEFAULT_SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 min
 const DEFAULT_TIMEOUT = 60_000;
+const DEFAULT_STREAM_STALL_TIMEOUT_MS = 60_000;
+const DEFAULT_SCAN_TIMEOUT_MS = 15_000;
 const DEFAULT_RETRIES = 0;
 const DEFAULT_RETRIES_DELAY_MS = 1000;
 
@@ -100,6 +106,9 @@ export interface ResolvedConfig {
   cascadeEnabled: boolean;
   fallBackModality: FallbackModality;
   fallbackLimit: number;
+  logLevel: LogLevel;
+  streamStallTimeoutMs: number;
+  scanTimeoutMs: number;
   providers: ResolvedProviderConfig[];
 }
 
@@ -192,9 +201,15 @@ function resolveProvider(
     ids.add(m.modelId);
   }
 
+  // Normalize baseUrl: strip trailing slashes, then ensure a version segment
+  // (/v1 or similar) is present. Users should configure this explicitly; this
+  // is a defensive fallback only.
+  const rawBase = provider.baseUrl.replace(/\/+$/, "");
+  const normalizedBase = /\/v\d+$/.test(rawBase) ? rawBase : `${rawBase}/v1`;
+
   return {
     name,
-    baseUrl: provider.baseUrl.replace(/\/+$/, ""), // strip trailing slashes
+    baseUrl: normalizedBase,
     apiKey: provider.apiKey,
     retries: provider.retries ?? DEFAULT_RETRIES,
     retriesDelayMs: provider.retriesDelayMs ?? DEFAULT_RETRIES_DELAY_MS,
@@ -258,6 +273,9 @@ export function validateAndResolve(raw: GatewayConfig): ResolvedConfig {
     cascadeEnabled: raw.cascadeEnabled ?? false,
     fallBackModality: raw.fallBackModality ?? "cascade",
     fallbackLimit: raw.fallbackLimit ?? 0,
+    logLevel: raw.logLevel ?? "INFO",
+    streamStallTimeoutMs: raw.streamStallTimeoutMs ?? DEFAULT_STREAM_STALL_TIMEOUT_MS,
+    scanTimeoutMs: raw.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
     providers,
   };
 }
