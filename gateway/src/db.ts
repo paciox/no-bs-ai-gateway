@@ -314,6 +314,10 @@ export function getAllModelStatuses() {
 
 export function pruneOldRecords(retentionDays: number): void {
   const db = getDb();
+  // Remove errors referencing old requests first to satisfy FK constraint
+  db.prepare(
+    `DELETE FROM errors WHERE request_id IN (SELECT id FROM requests WHERE timestamp < datetime('now', ? || ' days'))`
+  ).run(`-${retentionDays}`);
   const deleted1 = db
     .prepare(
       `DELETE FROM errors WHERE timestamp < datetime('now', ? || ' days')`
